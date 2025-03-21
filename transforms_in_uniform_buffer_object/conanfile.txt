@@ -1,0 +1,11 @@
+[requires]
+glad/0.1.36
+glfw/3.4
+glm/cci.20230113
+
+[generators]
+CMakeDeps
+CMakeToolchain
+
+[layout]
+cmake_layout
