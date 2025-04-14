@@ -5,10 +5,15 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
+#include <vector>
+#include <array>
 // clang-format on
 
-int window_width = 1920;
-int window_height = 1080;
+// int window_width = 1920;
+// int window_height = 1080;
+
+int window_width = 800;
+int window_height = 800;
 
 // TODO: next we have to make the number of ubos variable to do further testing
 
@@ -86,23 +91,77 @@ void generate_model_matrices(glm::mat4 *model_matrices, int num_objects,
   }
 }
 
+std::string generate_shader_code(int num_ubos,
+                                 int size_of_model_matrices_per_ubo) {
+  std::string shader_code = "#version 330 core\n"
+                            "layout (location = 0) in vec3 position;\n"
+                            "uniform mat4 projection;\n"
+                            "uniform mat4 view;\n";
+
+  // Declare the UBOs
+  for (int i = 0; i < num_ubos; ++i) {
+    shader_code += "layout(std140) uniform ModelMatrices" + std::to_string(i) +
+                   " {\n"
+                   "    mat4 modelMatrices" +
+                   std::to_string(i) + "[" +
+                   std::to_string(size_of_model_matrices_per_ubo) +
+                   "];\n"
+                   "};\n";
+  }
+
+  // Begin main function
+  shader_code += "void main() {\n"
+                 "    int triangleIndex = gl_VertexID / 3;\n"
+                 "    mat4 model;\n";
+
+  // Generate a generalized if block
+  shader_code += "    int block = triangleIndex / " +
+                 std::to_string(size_of_model_matrices_per_ubo) + ";\n";
+  shader_code += "    int index = triangleIndex % " +
+                 std::to_string(size_of_model_matrices_per_ubo) + ";\n";
+
+  // Generate a switch statement
+  shader_code += "    switch (block) {\n";
+  for (int i = 0; i < num_ubos; ++i) {
+    shader_code += "        case " + std::to_string(i) +
+                   ": model = modelMatrices" + std::to_string(i) +
+                   "[index]; break;\n";
+  }
+  shader_code += "        default: model = mat4(1.0); break;\n";
+  shader_code += "    }\n";
+
+  // Finish the shader
+  shader_code +=
+      "    gl_Position = projection * view * model * vec4(position, 1.0);\n"
+      "}\n";
+
+  return shader_code;
+}
+
 int main(int argc, char *argv[]) {
-  if (argc != 2) {
-    std::cerr << "Usage: " << argv[0] << " <num_objects>\n";
+  if (argc != 3) {
+    std::cerr << "Usage: " << argv[0] << " <num_matrices_per_ubo> <num_ubos>\n";
     return 1;
   }
 
-  int num_objects = std::atoi(argv[1]);
-  if (num_objects <= 0) {
-    std::cerr << "Error: num_objects must be a positive integer.\n";
+  int num_matrices_per_ubo = std::atoi(argv[1]);
+  if (num_matrices_per_ubo <= 0) {
+    std::cerr << "Error: num_matrices_per_ubo must be a positive integer.\n";
     return 1;
   }
 
-  int total_num_objects = num_objects * 4;
+  int num_ubos = std::atoi(argv[2]);
+  if (num_ubos <= 0) {
+    std::cerr << "Error: num_ubos must be a positive integer.\n";
+    return 1;
+  }
 
-  std::cout << "Number of objects: " << num_objects << '\n';
+  int total_num_objects = num_matrices_per_ubo * num_ubos;
 
-  GLuint VAO, VBO, shader_program, UBO_0, UBO_1, UBO_2, UBO_3;
+  std::cout << "Number of objects: " << num_matrices_per_ubo << '\n';
+
+  // this needs to be generalized
+  GLuint VAO, VBO, shader_program;
   GLfloat triangle_vertices[total_num_objects * 9]; // 3 vertices per triangle,
                                                     // 9 components per triangle
 
@@ -135,6 +194,7 @@ int main(int argc, char *argv[]) {
   glGenBuffers(1, &VBO);
   glBindVertexArray(VAO);
 
+  // create a triangle for each object
   for (int i = 0; i < total_num_objects; ++i) {
     // Define a small triangle centered at (0, 0)
     float scale = 0.10;
@@ -162,62 +222,11 @@ int main(int argc, char *argv[]) {
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   glBindVertexArray(0);
 
+  // consider the following code, create a function that, generalize the number
+  // of uniform buffer objects also generalize the if statement block to a
+  // single computation based on the number of ubos and size of each one
   std::string shader_code =
-      "#version 330 core\n"
-
-      "layout (location = 0) in vec3 position;\n"
-      "uniform mat4 projection;\n"
-      "uniform mat4 view;\n"
-
-      "uniform float camera_rotation_angle;\n"
-
-      "layout(std140) uniform ModelMatrices0 {\n"
-      "    mat4 modelMatrices0[" +
-      std::to_string(num_objects) +
-      "];\n"
-      "};\n"
-      "layout(std140) uniform ModelMatrices1 {\n"
-      "    mat4 modelMatrices1[" +
-      std::to_string(num_objects) +
-      "];\n"
-      "};\n"
-      "layout(std140) uniform ModelMatrices2 {\n"
-      "    mat4 modelMatrices2[" +
-      std::to_string(num_objects) +
-      "];\n"
-      "};\n"
-      "layout(std140) uniform ModelMatrices3 {\n"
-      "    mat4 modelMatrices3[" +
-      std::to_string(num_objects) +
-      "];\n"
-      "};\n"
-
-      "void main() {\n"
-      "    int triangleIndex = gl_VertexID / 3;\n"
-      "    mat4 model;\n"
-      "    if (triangleIndex < " +
-      std::to_string(num_objects) +
-      ") {\n"
-      "        model = modelMatrices0[triangleIndex];\n"
-      "    } else if (triangleIndex < 2 * " +
-      std::to_string(num_objects) +
-      ") {\n"
-      "        model = modelMatrices1[triangleIndex - " +
-      std::to_string(num_objects) +
-      "];\n"
-      "    } else if (triangleIndex < 3 * " +
-      std::to_string(num_objects) +
-      ") {\n"
-      "        model = modelMatrices2[triangleIndex - 2 * " +
-      std::to_string(num_objects) +
-      "];\n"
-      "    } else {\n"
-      "        model = modelMatrices3[triangleIndex - 3 * " +
-      std::to_string(num_objects) +
-      "];\n"
-      "    }\n"
-      "    gl_Position = projection * view * model * vec4(position, 1.0);\n"
-      "}";
+      generate_shader_code(num_ubos, num_matrices_per_ubo);
 
   const char *vertex_shader_source = shader_code.c_str();
 
@@ -233,75 +242,63 @@ int main(int argc, char *argv[]) {
   shader_program =
       create_shader_program(vertex_shader_source, fragmentShaderSource);
 
-  glm::mat4 model_matrices0[num_objects];
-  glm::mat4 model_matrices1[num_objects];
-  glm::mat4 model_matrices2[num_objects];
-  glm::mat4 model_matrices3[num_objects];
+  // TODO: instead we do a class that has a bounded id generator and use that
+  // to add stuff to it internally so we don't have to worry about creating four
+  // of these instead they are already internally there and say ok, push this
+  // one on and it is just autmatically correct?
 
-  // Define a margin to space out the cubes
-  float margin = 0.5f; // Adjust this value as needed for the desired spacing
+  // Use a radius to scale the unit sphere positions
+  float radius = 2.f; // Example radius, adjust as needed
 
-  // Generate matrices for the first cube, starting from the top-right (1, 1,
-  // -1)
-  glm::vec3 origin0(1.0f + margin, 1.0f + margin, -1.0f);
-  generate_model_matrices(model_matrices0, num_objects, origin0);
+  // Generate uniformly distributed origins on a unit sphere
+  std::vector<glm::vec3> origins;
+  origins.reserve(num_ubos);
 
-  // Generate matrices for the second cube, starting from the top-left (-1, 1,
-  // -1)
-  glm::vec3 origin1(-1.0f - margin, 1.0f + margin, -1.0f);
-  generate_model_matrices(model_matrices1, num_objects, origin1);
+  for (int i = 0; i < num_ubos; ++i) {
+    float offset = 2.0f / num_ubos;
+    float y = i * offset - 1.0f + offset / 2.0f;
+    float r = std::sqrt(1.0f - y * y);
 
-  // Generate matrices for the third cube, starting from the bottom-left (-1,
-  // -1, -1)
-  glm::vec3 origin2(-1.0f - margin, -1.0f - margin, -1.0f);
-  generate_model_matrices(model_matrices2, num_objects, origin2);
+    float phi = i * 2.39996323f; // ~Golden angle in radians
+    float x = std::cos(phi) * r;
+    float z = std::sin(phi) * r;
 
-  // Generate matrices for the fourth cube, starting from the bottom-right (1,
-  // -1, -1)
-  glm::vec3 origin3(1.0f + margin, -1.0f - margin, -1.0f);
-  generate_model_matrices(model_matrices3, num_objects, origin3);
+    // Scale the unit sphere position by the radius
+    origins.emplace_back(x * radius, y * radius, z * radius);
+  }
 
-  // Create and bind the UBO
-  glGenBuffers(1, &UBO_0);
-  glBindBuffer(GL_UNIFORM_BUFFER, UBO_0);
-  glBufferData(GL_UNIFORM_BUFFER, sizeof(model_matrices0), model_matrices0,
-               GL_STATIC_DRAW);
-  glBindBufferBase(GL_UNIFORM_BUFFER, 0, UBO_0); // Bind to binding point 0
+  // Allocate space for model matrices on CPU
+  std::vector<std::vector<glm::mat4>> ltw_matrices_on_cpu(num_ubos);
 
-  glGenBuffers(1, &UBO_1);
-  glBindBuffer(GL_UNIFORM_BUFFER, UBO_1);
-  glBufferData(GL_UNIFORM_BUFFER, sizeof(model_matrices1), model_matrices1,
-               GL_STATIC_DRAW);
-  glBindBufferBase(GL_UNIFORM_BUFFER, 1, UBO_1); // Bind to binding point 1
+  // Generate matrices for each group
+  for (int i = 0; i < num_ubos; ++i) {
+    ltw_matrices_on_cpu[i].resize(num_matrices_per_ubo);
+    generate_model_matrices(ltw_matrices_on_cpu[i].data(), num_matrices_per_ubo,
+                            origins[i]);
+  }
 
-  glGenBuffers(2, &UBO_2);
-  glBindBuffer(GL_UNIFORM_BUFFER, UBO_2);
-  glBufferData(GL_UNIFORM_BUFFER, sizeof(model_matrices2), model_matrices2,
-               GL_STATIC_DRAW);
-  glBindBufferBase(GL_UNIFORM_BUFFER, 2, UBO_2); // Bind to binding point 2
+  // Create and bind UBOs
+  std::vector<GLuint> ubos(num_ubos);
+  glGenBuffers(num_ubos, ubos.data());
 
-  glGenBuffers(3, &UBO_3);
-  glBindBuffer(GL_UNIFORM_BUFFER, UBO_3);
-  glBufferData(GL_UNIFORM_BUFFER, sizeof(model_matrices3), model_matrices3,
-               GL_STATIC_DRAW);
-  glBindBufferBase(GL_UNIFORM_BUFFER, 3, UBO_3); // Bind to binding point 3
+  for (int i = 0; i < num_ubos; ++i) {
+    glBindBuffer(GL_UNIFORM_BUFFER, ubos[i]);
+    glBufferData(GL_UNIFORM_BUFFER,
+                 ltw_matrices_on_cpu[i].size() * sizeof(glm::mat4),
+                 ltw_matrices_on_cpu[i].data(), GL_STATIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, i, ubos[i]);
+  }
 
   // Use the shader program
   glUseProgram(shader_program);
 
-  GLuint block_index_0 =
-      glGetUniformBlockIndex(shader_program, "ModelMatrices0");
-  GLuint block_index_1 =
-      glGetUniformBlockIndex(shader_program, "ModelMatrices1");
-  GLuint block_index_2 =
-      glGetUniformBlockIndex(shader_program, "ModelMatrices2");
-  GLuint block_index_3 =
-      glGetUniformBlockIndex(shader_program, "ModelMatrices3");
-
-  glUniformBlockBinding(shader_program, block_index_0, 0);
-  glUniformBlockBinding(shader_program, block_index_1, 1);
-  glUniformBlockBinding(shader_program, block_index_2, 2);
-  glUniformBlockBinding(shader_program, block_index_3, 3);
+  // Get uniform block indices and bind them
+  for (int i = 0; i < num_ubos; ++i) {
+    std::string block_name = "ModelMatrices" + std::to_string(i);
+    GLuint block_index =
+        glGetUniformBlockIndex(shader_program, block_name.c_str());
+    glUniformBlockBinding(shader_program, block_index, i);
+  }
 
   // Set the projection and view matrices
   glm::mat4 projection = glm::perspective(
@@ -346,7 +343,7 @@ int main(int argc, char *argv[]) {
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // Draw the triangles
+    // Draw the triangles, multiplying by 3 because 3 indices per triangle
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 3 * total_num_objects);
     glBindVertexArray(0);
@@ -358,7 +355,6 @@ int main(int argc, char *argv[]) {
   // Clean up
   glDeleteVertexArrays(1, &VAO);
   glDeleteBuffers(1, &VBO);
-  glDeleteBuffers(1, &UBO_0);
   glDeleteProgram(shader_program);
 
   glfwTerminate();
